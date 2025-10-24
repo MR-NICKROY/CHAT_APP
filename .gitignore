@@ -1,0 +1,5 @@
+# Arattai_Backend/.gitignore
+
+/config/firebase-service-account.json
+.env  # <-- ADD THIS LINE
+node_modules # <-- ADD THIS LINE
