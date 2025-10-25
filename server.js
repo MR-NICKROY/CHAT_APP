@@ -11,41 +11,78 @@ const server = http.createServer(app);
 
 const io = new Server(server, {
   pingTimeout: 60000,
+  pingInterval: 25000,
   cors: {
     origin: true,
     credentials: true,
   },
+  transports: ['websocket', 'polling'], // Enable both transports
 });
 
 // Store active users: { userId: socketId }
 const activeUsers = new Map();
 
 io.on('connection', (socket) => {
-  console.log('🔌 A user connected to socket.io');
+  console.log('🔌 New socket connection established:', socket.id);
 
   // Setup - User joins their personal room
   socket.on('setup', async (userData) => {
+    console.log('📝 Setup event received:', userData);
+    
     if (!userData || !userData._id) {
+      console.error('❌ Invalid userData in setup:', userData);
+      socket.emit('setup error', { message: 'Invalid user data' });
       return;
     }
 
-    const userId = userData._id;
-    socket.join(userId);
-    activeUsers.set(userId, socket.id);
+    const userId = userData._id.toString(); // Ensure string format
     
-    console.log(`✅ User ${userData.name} (ID: ${userId}) joined their room`);
-    
-    // Update user online status in database
     try {
-      await User.findByIdAndUpdate(userId, { isOnline: true });
+      // Join personal room
+      socket.join(userId);
       
-      // Broadcast to all users that this user is online
-      socket.broadcast.emit('user online', userId);
+      // Store active user
+      activeUsers.set(userId, socket.id);
+      
+      console.log(`✅ User ${userData.name} (ID: ${userId}) joined their room`);
+      console.log(`👥 Total active users: ${activeUsers.size}`);
+      
+      // Update user online status in database
+      const updatedUser = await User.findByIdAndUpdate(
+        userId, 
+        { 
+          isOnline: true,
+          lastSeen: new Date()
+        },
+        { new: true }
+      );
+      
+      if (!updatedUser) {
+        console.error('❌ User not found in database:', userId);
+        socket.emit('setup error', { message: 'User not found' });
+        return;
+      }
+      
+      console.log(`🟢 User ${userData.name} is now ONLINE`);
+      
+      // Emit connected event to the user
+      socket.emit('connected', { userId, isOnline: true });
+      
+      // Broadcast to ALL other users that this user is online
+      socket.broadcast.emit('user online', { 
+        userId,
+        userName: userData.name,
+        timestamp: new Date()
+      });
+      
+      // Send list of currently online users to the newly connected user
+      const onlineUserIds = Array.from(activeUsers.keys());
+      socket.emit('online users list', onlineUserIds);
+      
     } catch (error) {
-      console.error('Error updating online status:', error);
+      console.error('❌ Error in setup:', error);
+      socket.emit('setup error', { message: error.message });
     }
-    
-    socket.emit('connected');
   });
 
   // Join a specific chat room
@@ -62,19 +99,12 @@ io.on('connection', (socket) => {
 
   // Typing indicator
   socket.on('typing', (chatId) => {
-    // --- FIX: Emit to chat room, not personal room ---
     socket.to(chatId).emit('typing', chatId);
   });
 
   socket.on('stop typing', (chatId) => {
-    // --- FIX: Emit to chat room, not personal room ---
     socket.to(chatId).emit('stop typing', chatId);
   });
-
-  // --- FIX: Removed 'new message' handler ---
-  // This logic is now handled in messageController.js to ensure
-  // messages are only broadcast *after* they are saved to the database.
-  // This prevents duplicate messages and race conditions.
 
   // Message read receipt
   socket.on('message read', async (data) => {
@@ -96,7 +126,7 @@ io.on('connection', (socket) => {
           });
           await message.save();
           
-          // Notify sender (in their personal room) about read receipt
+          // Notify sender about read receipt
           socket.to(message.sender.toString()).emit('message read receipt', {
             messageId,
             chatId,
@@ -105,7 +135,7 @@ io.on('connection', (socket) => {
         }
       }
     } catch (error) {
-      console.error('Error marking message as read:', error);
+      console.error('❌ Error marking message as read:', error);
     }
   });
 
@@ -113,7 +143,6 @@ io.on('connection', (socket) => {
   socket.on('message reaction', (data) => {
     const { messageId, chatId, reaction, userId } = data;
     
-    // Broadcast reaction to all users in chat
     socket.to(chatId).emit('reaction added', {
       messageId,
       reaction,
@@ -130,9 +159,16 @@ io.on('connection', (socket) => {
     socket.to(chatId).emit('user stopped recording', chatId);
   });
 
-  // Disconnect
+  // Get online users (on demand)
+  socket.on('get online users', () => {
+    const onlineUserIds = Array.from(activeUsers.keys());
+    console.log('📋 Sending online users list:', onlineUserIds);
+    socket.emit('online users list', onlineUserIds);
+  });
+
+  // Disconnect handler
   socket.on('disconnect', async () => {
-    console.log('🔌 User disconnected');
+    console.log('🔌 Socket disconnected:', socket.id);
     
     // Find and remove user from active users
     let disconnectedUserId = null;
@@ -146,38 +182,71 @@ io.on('connection', (socket) => {
     }
     
     if (disconnectedUserId) {
+      console.log(`🔴 User ${disconnectedUserId} disconnected`);
+      console.log(`👥 Total active users: ${activeUsers.size}`);
+      
       try {
         // Update user offline status
-        const user = await User.findById(disconnectedUserId);
+        const user = await User.findByIdAndUpdate(
+          disconnectedUserId,
+          {
+            isOnline: false,
+            lastSeen: new Date()
+          },
+          { new: true }
+        );
+        
         if (user) {
-          user.isOnline = false;
-          user.lastSeen = new Date();
-          await user.save();
+          console.log(`🔴 User ${user.name} is now OFFLINE`);
           
-          // Broadcast to all users that this user went offline
+          // Broadcast to ALL users that this user went offline
           socket.broadcast.emit('user offline', {
             userId: disconnectedUserId,
-            lastSeen: user.lastSeen
+            userName: user.name,
+            lastSeen: user.lastSeen,
+            timestamp: new Date()
           });
-          
-          console.log(`❌ User ${disconnectedUserId} went offline`);
         }
       } catch (error) {
-        console.error('Error updating offline status:', error);
+        console.error('❌ Error updating offline status:', error);
       }
+    } else {
+      console.log('⚠️ Disconnected socket was not in activeUsers map');
     }
   });
 
-  // Get online users
-  socket.on('get online users', () => {
-    const onlineUserIds = Array.from(activeUsers.keys());
-    socket.emit('online users', onlineUserIds);
+  // Handle connection errors
+  socket.on('error', (error) => {
+    console.error('❌ Socket error:', error);
   });
 });
 
 // Store io instance in app for use in routes
 app.set('io', io);
 
+// Graceful shutdown
+process.on('SIGTERM', async () => {
+  console.log('⚠️ SIGTERM received, closing server gracefully...');
+  
+  // Set all active users to offline
+  for (const userId of activeUsers.keys()) {
+    try {
+      await User.findByIdAndUpdate(userId, {
+        isOnline: false,
+        lastSeen: new Date()
+      });
+    } catch (error) {
+      console.error(`Error setting user ${userId} offline:`, error);
+    }
+  }
+  
+  server.close(() => {
+    console.log('✅ Server closed');
+    process.exit(0);
+  });
+});
+
 server.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
+  console.log(`🔌 Socket.IO ready for connections`);
 });
