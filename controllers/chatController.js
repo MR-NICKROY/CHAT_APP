@@ -36,7 +36,7 @@ const accessChat = asyncHandler(async (req, res) => {
       { users: { $eq: userId } },
     ],
   })
-    .populate('users', 'name image status isOnline lastSeen') // тнР Added isOnline/lastSeen
+    .populate('users', 'name image status isOnline lastSeen')
     .populate('latestMessage');
 
   isChat = await User.populate(isChat, {
@@ -68,7 +68,7 @@ const accessChat = asyncHandler(async (req, res) => {
     try {
       const createdChat = await Chat.create(chatData);
       const fullChat = await Chat.findOne({ _id: createdChat._id })
-        .populate('users', 'name image status isOnline lastSeen'); // тнР Added isOnline/lastSeen
+        .populate('users', 'name image status isOnline lastSeen');
       
       const chatResponse = fullChat.toObject();
       chatResponse.unreadCount = 0;
@@ -90,7 +90,7 @@ const fetchChats = asyncHandler(async (req, res) => {
       users: { $eq: req.user._id },
       archivedBy: { $ne: req.user._id }
     })
-      .populate('users', 'name image status isOnline lastSeen') // тнР Added isOnline/lastSeen
+      .populate('users', 'name image status isOnline lastSeen')
       .populate('groupAdmin', 'name image')
       .populate('latestMessage')
       .sort({ updatedAt: -1 });
@@ -101,11 +101,9 @@ const fetchChats = asyncHandler(async (req, res) => {
     });
 
     // --- FIX: Replaced N+1 query with aggregation ---
-    // Efficiently get all unread counts in one query
     const chatIds = chats.map(chat => chat._id);
 
     const unreadCounts = await Message.aggregate([
-      // Match messages that are unread by the current user
       {
         $match: {
           chat: { $in: chatIds },
@@ -115,24 +113,21 @@ const fetchChats = asyncHandler(async (req, res) => {
           deletedFor: { $ne: req.user._id }
         }
       },
-      // Group by chat ID and count them
       {
         $group: {
-          _id: '$chat', // Group by the chat ID
-          unreadCount: { $sum: 1 } // Count messages in each group
+          _id: '$chat',
+          unreadCount: { $sum: 1 }
         }
       }
     ]);
 
-    // Create a Map for quick lookup
     const unreadMap = new Map(
       unreadCounts.map(item => [item._id.toString(), item.unreadCount])
     );
 
-    // Add unread count and mute status to each chat
     const chatsWithUnread = chats.map(chat => {
       const chatObj = chat.toObject();
-      chatObj.unreadCount = unreadMap.get(chat._id.toString()) || 0; // Get count from Map
+      chatObj.unreadCount = unreadMap.get(chat._id.toString()) || 0;
       chatObj.isMuted = chat.mutedBy.includes(req.user._id);
       return chatObj;
     });
@@ -153,7 +148,15 @@ const createGroupChat = asyncHandler(async (req, res) => {
     return res.status(400).send({ message: 'Please provide a group name and users' });
   }
 
-  let users = req.body.users;
+  // --- BUG FIX: Parse the users string from form-data ---
+  let users;
+  try {
+    users = JSON.parse(req.body.users);
+  } catch (e) {
+    res.status(400);
+    throw new Error('Users field must be a valid JSON array string. e.g., ["id1", "id2"]');
+  }
+  // --- END OF BUG FIX ---
 
   if (users.length < 1) {
     return res.status(400).send('At least 2 users are required for a group chat');
@@ -164,6 +167,7 @@ const createGroupChat = asyncHandler(async (req, res) => {
   const validUsers = [];
 
   for (const userId of users) {
+    // This is where the original error happened
     const user = await User.findById(userId);
     if (user && !currentUser.hasBlocked(userId) && !user.hasBlocked(req.user._id)) {
       validUsers.push(userId);
@@ -183,7 +187,7 @@ const createGroupChat = asyncHandler(async (req, res) => {
     });
 
     const fullGroupChat = await Chat.findOne({ _id: groupChat._id })
-      .populate('users', 'name image status isOnline lastSeen') // тнР Added isOnline/lastSeen
+      .populate('users', 'name image status isOnline lastSeen')
       .populate('groupAdmin', 'name image');
 
     res.status(200).json(fullGroupChat);
@@ -211,7 +215,6 @@ const renameGroup = asyncHandler(async (req, res) => {
     throw new Error('This is not a group chat');
   }
 
-  // Check permissions
   if (!chat.isAdmin(req.user._id)) {
     res.status(403);
     throw new Error('Only the group admin can rename the group');
@@ -221,7 +224,7 @@ const renameGroup = asyncHandler(async (req, res) => {
   await chat.save();
 
   const updatedChat = await Chat.findById(chatId)
-    .populate('users', 'name image status isOnline lastSeen') // тнР Added isOnline/lastSeen
+    .populate('users', 'name image status isOnline lastSeen')
     .populate('groupAdmin', 'name image');
 
   res.json(updatedChat);
@@ -245,13 +248,11 @@ const addToGroup = asyncHandler(async (req, res) => {
     throw new Error('Only the group admin can add members');
   }
 
-  // Check if user is already in group
   if (chat.isMember(userId)) {
     res.status(400);
     throw new Error('User is already in the group');
   }
 
-  // Check blocks
   const currentUser = await User.findById(req.user._id);
   const userToAdd = await User.findById(userId);
 
@@ -269,7 +270,7 @@ const addToGroup = asyncHandler(async (req, res) => {
   await chat.save();
 
   const added = await Chat.findById(chatId)
-    .populate('users', 'name image status isOnline lastSeen') // тнР Added isOnline/lastSeen
+    .populate('users', 'name image status isOnline lastSeen')
     .populate('groupAdmin', 'name image');
 
   res.json(added);
@@ -302,7 +303,7 @@ const removeFromGroup = asyncHandler(async (req, res) => {
   await chat.save();
 
   const removed = await Chat.findById(chatId)
-    .populate('users', 'name image status isOnline lastSeen') // тнР Added isOnline/lastSeen
+    .populate('users', 'name image status isOnline lastSeen')
     .populate('groupAdmin', 'name image');
 
   res.json(removed);
@@ -313,7 +314,6 @@ const removeFromGroup = asyncHandler(async (req, res) => {
 // @access  Private
 const leaveGroup = asyncHandler(async (req, res) => {
   const { chatId } = req.body;
-  // --- FIX: Get io instance from app ---
   const io = req.app.get("io");
 
   const chat = await Chat.findById(chatId);
@@ -328,25 +328,21 @@ const leaveGroup = asyncHandler(async (req, res) => {
     throw new Error('This is not a group chat');
   }
 
-  // If admin is leaving, transfer admin or delete group
   if (chat.isAdmin(req.user._id)) {
     if (chat.users.length > 1) {
-      // Transfer admin to next user
       const nextAdminId = chat.users.find(user => user.toString() !== req.user._id.toString());
       chat.groupAdmin = nextAdminId;
 
-      // --- FIX: Create system message for admin transfer ---
       try {
         const nextAdminUser = await User.findById(nextAdminId).select('name');
         if (nextAdminUser) {
           let systemMessage = await Message.create({
-            sender: req.user._id, // Use leaving admin's ID as sender
+            sender: req.user._id,
             chat: chatId,
             content: `${nextAdminUser.name} is now the group admin.`,
             messageType: 'system'
           });
 
-          // Populate for socket broadcast
           systemMessage = await systemMessage.populate('sender', 'name image');
           systemMessage = await systemMessage.populate('chat');
            systemMessage = await User.populate(systemMessage, {
@@ -354,22 +350,17 @@ const leaveGroup = asyncHandler(async (req, res) => {
             select: 'name image status isOnline lastSeen',
           });
           
-          // Emit this system message to the chat
           io.to(chatId.toString()).emit('message received', systemMessage);
           
-          // Update latestMessage
           chat.latestMessage = systemMessage._id;
         }
       } catch (err) {
         console.error("Error creating system message for admin transfer:", err);
       }
-      // --- END OF FIX ---
 
     } else {
-      // Delete group if admin is the last member
-      await Chat.findByIdAndDelete(chatId);
-      // Also delete all messages associated with the chat
       await Message.deleteMany({ chat: chatId });
+      await Chat.findByIdAndDelete(chatId);
       return res.json({ success: true, message: 'Group deleted' });
     }
   }
