@@ -80,7 +80,7 @@ const getAllUsers = asyncHandler(async (req, res) => {
     blockedUsers: { $ne: req.user._id }, // Exclude users who blocked me
     isActive: true
   })
-    // ⭐⭐ THIS IS THE CHANGE YOU REQUESTED ⭐⭐
+    // тнРтнР THIS IS THE CHANGE YOU REQUESTED тнРтнР
     .select('name image status isOnline lastSeen')
     .limit(20);
 
@@ -178,10 +178,10 @@ const getBlockedUsers = asyncHandler(async (req, res) => {
 // @access  Private
 const getUserById = asyncHandler(async (req, res) => {
   const user = await User.findById(req.params.userId)
-    .select('name image status isOnline lastSeen'); // ⭐ Added isOnline and lastSeen
+    .select('name image status isOnline lastSeen'); // тнР Added isOnline and lastSeen
 
   if (!user) {
-    res.status(404);
+    res.status(44);
     throw new Error('User not found');
   }
 
@@ -195,22 +195,7 @@ const getUserById = asyncHandler(async (req, res) => {
   res.json(user);
 });
 
-// @desc    Update online status
-// @route   PUT /api/users/status/online
-// @access  Private
-const updateOnlineStatus = asyncHandler(async (req, res) => {
-  const { isOnline } = req.body;
-
-  const user = await User.findById(req.user._id);
-  
-  if (user) {
-    await user.setOnlineStatus(isOnline);
-    res.json({ success: true, isOnline: user.isOnline, lastSeen: user.lastSeen });
-  } else {
-    res.status(404);
-    throw new Error('User not found');
-  }
-});
+// --- updateOnlineStatus function removed ---
 
 module.exports = {
   getUserProfile,
@@ -220,5 +205,5 @@ module.exports = {
   unblockUser,
   getBlockedUsers,
   getUserById,
-  updateOnlineStatus // ⭐ Re-added this export
+  // --- updateOnlineStatus export removed ---
 };
