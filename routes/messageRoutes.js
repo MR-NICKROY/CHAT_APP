@@ -18,11 +18,13 @@ const { messageLimiter, uploadLimiter, searchLimiter } = require('../middleware/
 
 const router = express.Router();
 
+// --- FIX: Specific routes MUST be defined before dynamic routes ---
+
 // Get unread count
 router.route('/unread').get(protect, getUnreadCount);
 
-// Get all messages for a chat
-router.route('/:chatId').get(protect, allMessages);
+// Search messages
+router.route('/search').get(protect, searchLimiter, searchMessages); // <-- MOVED UP
 
 // Send a new message (with optional file)
 router.route('/').post(protect, uploadLimiter, upload.single('file'), sendMessage);
@@ -39,18 +41,18 @@ router.route('/react').post(protect, reactToMessage);
 // Remove reaction
 router.route('/react').delete(protect, removeReaction);
 
+// Download file (specific dynamic route)
+router.route('/download/:messageId').get(protect, downloadFile); // <-- MOVED UP
+
+// Delete message for me only (specific dynamic route)
+router.route('/:messageId/deleteforme').put(protect, deleteMessageForMe); // <-- MOVED UP
+
+// --- General dynamic routes MUST be defined LAST ---
+
+// Get all messages for a chat
+router.route('/:chatId').get(protect, allMessages); // <-- MOVED DOWN
+
 // Delete message
-router.route('/:messageId').delete(protect, deleteMessage);
-
-// Delete message for me only
-router.route('/:messageId/deleteforme').put(protect, deleteMessageForMe);
-
-// Search messages
-router.route('/search').get(protect, searchLimiter, searchMessages);
-
-// Download file
-router.route('/download/:messageId').get(protect, downloadFile);
-
-
+router.route('/:messageId').delete(protect, deleteMessage); // <-- MOVED DOWN
 
 module.exports = router;
