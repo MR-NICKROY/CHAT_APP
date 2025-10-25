@@ -8,7 +8,7 @@ const {
   unblockUser,
   getBlockedUsers,
   getUserById,
-  updateOnlineStatus
+  // --- updateOnlineStatus import removed ---
 } = require('../controllers/userController');
 const upload = require('../middleware/uploadMiddleware');
 const { uploadLimiter } = require('../middleware/rateLimiter');
@@ -32,8 +32,7 @@ router.route('/unblock').post(protect, unblockUser);
 // Get blocked users
 router.route('/blocked').get(protect, getBlockedUsers);
 
-// Update online status
-router.route('/status/online').put(protect, updateOnlineStatus);
+// --- /status/online route removed ---
 
 // Get user by ID
 router.route('/:userId').get(protect, getUserById);
