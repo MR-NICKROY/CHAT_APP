@@ -309,7 +309,7 @@ const markMessagesAsRead = asyncHandler(async (req, res) => {
 const reactToMessage = asyncHandler(async (req, res) => {
   const { messageId, emoji } = req.body;
 
-  const validEmojis = ["👍", "❤️", "😂", "😮", "😢", "🙏", "🔥", "👏"];
+  const validEmojis = ['👍', '❤️', '😂', '😮', '😢', '🙏', '🔥', '👏','😍','☺️'];
 
   if (!validEmojis.includes(emoji)) {
     res.status(400);
