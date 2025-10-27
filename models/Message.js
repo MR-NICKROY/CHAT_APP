@@ -42,7 +42,7 @@ const messageSchema = mongoose.Schema({
     },
     emoji: {
       type: String,
-      enum: ['👍', '❤️', '😂', '😮', '😢', '🙏', '🔥', '👏']
+      enum: ['👍', '❤️', '😂', '😮', '😢', '🙏', '🔥', '👏','😍','☺️']
     },
     createdAt: {
       type: Date,
